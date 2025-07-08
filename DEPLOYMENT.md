@@ -46,7 +46,7 @@ npm install
 cd /Users/akshay/Desktop/Projects/todo-app/backend
 npm start
 ```
-✅ Backend will be available at: http://localhost:5656
+✅ Backend will be available at: http://localhost:5757
 
 ### 3. Start Frontend Server
 ```bash
@@ -63,7 +63,7 @@ npm start
 
 ### Backend API Test
 ```bash
-curl http://localhost:5656/api/health
+curl http://localhost:5757/api/health
 ```
 Expected response: `{"status":"OK","timestamp":"..."}`
 
@@ -97,9 +97,9 @@ Builds the app for production to the `build` folder.
 
 ### Port Already in Use
 ```bash
-# Kill processes on ports 5555 and 5656
+# Kill processes on ports 5555 and 5757
 lsof -ti:5555 | xargs kill -9
-lsof -ti:5656 | xargs kill -9
+lsof -ti:5757 | xargs kill -9
 ```
 
 ### Reset Database
@@ -130,14 +130,14 @@ npm cache clean --force
 
 ### Backend (.env file)
 ```
-PORT=5656
+PORT=5757
 NODE_ENV=production
 ```
 
 ### Frontend (environment variables)
 ```
 PORT=5555
-REACT_APP_API_URL=http://localhost:5656/api
+REACT_APP_API_URL=http://localhost:5757/api
 ```
 
 ## 🎯 Features to Test
@@ -152,7 +152,7 @@ REACT_APP_API_URL=http://localhost:5656/api
 
 | Issue | Solution |
 |-------|----------|
-|| "Cannot connect to backend" | Ensure backend is running on port 5656 |
+|| "Cannot connect to backend" | Ensure backend is running on port 5757 |
 | "Database error" | Delete todo.db and restart backend |
 | "npm install fails" | Clear npm cache and try again |
 | "Port in use" | Kill existing processes or use different ports |

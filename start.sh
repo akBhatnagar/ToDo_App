@@ -14,8 +14,8 @@ echo "Backend started with PID: $BACKEND_PID"
 sleep 3
 
 # Check if backend is running
-if curl -s http://localhost:5656/api/health > /dev/null; then
-    echo "✅ Backend is running on http://localhost:5656"
+if curl -s http://localhost:5757/api/health > /dev/null; then
+    echo "✅ Backend is running on http://localhost:5757"
 else
     echo "❌ Backend failed to start"
     exit 1
@@ -30,7 +30,7 @@ echo "Frontend started with PID: $FRONTEND_PID"
 
 echo ""
 echo "🎉 Todo App is starting up!"
-echo "📡 Backend: http://localhost:5656"
+echo "📡 Backend: http://localhost:5757"
 echo "🎨 Frontend: http://localhost:5555"
 echo ""
 echo "To stop the application, run:"

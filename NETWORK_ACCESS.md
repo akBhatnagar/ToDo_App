@@ -8,7 +8,7 @@ Your todo app is now configured for network access from other devices on the sam
 
 ### **Your Mac (Host):**
 - **IP Address:** `192.168.1.238`
-- **Backend Port:** `5656`
+- **Backend Port:** `5757`
 - **Frontend Port:** `5555`
 
 ### **Access URLs:**
@@ -34,7 +34,7 @@ On any other laptop/device on the same network:
 
 ### **1. Frontend API Configuration:**
 - Updated `frontend/src/services/api.js`
-- Changed from `localhost:5656` to `192.168.1.238:5656`
+- Changed from `localhost:5757` to `192.168.1.238:5757`
 - All API calls now use your Mac's IP address
 
 ### **2. React Dev Server:**
@@ -45,7 +45,7 @@ On any other laptop/device on the same network:
 ### **3. Backend Configuration:**
 - Already configured to accept external connections
 - Express server listens on all interfaces by default
-- Running on port 5656
+- Running on port 5757
 
 ## 🛡️ **Security Considerations:**
 
@@ -57,12 +57,12 @@ On any other laptop/device on the same network:
 ### **Firewall Status:**
 - macOS firewall is currently disabled
 - No additional firewall rules needed
-- App ports (5555, 5656) are accessible
+- App ports (5555, 5757) are accessible
 
 ## 🧪 **Testing Network Access:**
 
 ### **From Another Device:**
-1. **Test Backend:** http://192.168.1.238:5656/api/health
+1. **Test Backend:** http://192.168.1.238:5757/api/health
    - Should return: `{"status":"OK","timestamp":"..."}`
 
 2. **Test Frontend:** http://192.168.1.238:5555
@@ -78,7 +78,7 @@ If you can't access from another device:
 
 2. **Verify App is Running:**
    ```bash
-   curl http://192.168.1.238:5656/api/health
+   curl http://192.168.1.238:5757/api/health
    ```
 
 3. **Check Firewall (if enabled):**
@@ -102,7 +102,7 @@ To restrict access to your Mac only, change the API URL back:
 
 In `frontend/src/services/api.js`:
 ```javascript
-const API_BASE_URL = 'http://localhost:5656/api';
+const API_BASE_URL = 'http://localhost:5757/api';
 ```
 
 And remove `HOST=0.0.0.0` from `frontend/.env`.
