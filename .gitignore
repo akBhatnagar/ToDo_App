@@ -23,3 +23,6 @@ backend/node_modules
 # Optional if backend has database files or SQLite dumps
 *.sqlite
 *.db
+
+# Environment file
+frontend/.env
