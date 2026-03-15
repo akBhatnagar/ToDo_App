@@ -1,53 +1,83 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
-import { groupsAPI } from './services/api';
+import { groupsAPI, todosAPI } from './services/api';
 import GroupList from './components/GroupList';
 import TodoList from './components/TodoList';
 import AddTodo from './components/AddTodo';
-import PinModal from './components/PinModal';
-import ChangePinModal from './components/ChangePinModal';
+import Toast from './components/Toast';
 import './styles/App.css';
+
+function useDebounce(value, delay) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
 
 function TodoApp() {
   const { isDarkMode, toggleTheme } = useTheme();
   const [groups, setGroups] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [showHidden, setShowHidden] = useState(false);
-  const [completionFilter, setCompletionFilter] = useState('all'); // 'all', 'completed', 'notCompleted'
+  const [completionFilter, setCompletionFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [refreshTodos, setRefreshTodos] = useState(0);
-  const [hiddenPin, setHiddenPin] = useState('1234');
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [showChangePinModal, setShowChangePinModal] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [todos, setTodos] = useState([]);
+  const [todosLoading, setTodosLoading] = useState(false);
 
-  useEffect(() => {
-    document.documentElement.setAttribute(
-      'data-theme',
-      isDarkMode ? 'dark' : 'light'
-    );
-  }, [isDarkMode]);
-
-  useEffect(() => {
-    const fetchGroups = async () => {
-      try {
-        const response = await groupsAPI.getAll();
-        setGroups(response.data);
-      } catch (err) {
-        setError('Failed to fetch groups.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchGroups();
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ message, type, id: Date.now() });
   }, []);
+
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  const fetchGroups = useCallback(async () => {
+    try {
+      const response = await groupsAPI.getAll();
+      setGroups(response.data);
+    } catch {
+      showToast('Failed to load groups', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  const fetchTodos = useCallback(async () => {
+    setTodosLoading(true);
+    try {
+      const params = {};
+      if (selectedGroup) params.group_id = selectedGroup.id;
+      if (showHidden) params.hidden = 'true';
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+      const response = await todosAPI.getAll(params);
+      setTodos(response.data);
+    } catch {
+      showToast('Failed to load todos', 'error');
+    } finally {
+      setTodosLoading(false);
+    }
+  }, [selectedGroup, showHidden, debouncedSearch, showToast]);
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
+
+  useEffect(() => {
+    fetchTodos();
+  }, [fetchTodos]);
 
   const handleAddGroup = async (groupData) => {
     try {
       const response = await groupsAPI.create(groupData);
-      setGroups([...groups, response.data]);
+      setGroups((prev) => [...prev, response.data]);
+      showToast('Group created');
     } catch (err) {
-      setError('Failed to add group.');
+      const msg = err.response?.data?.error || 'Failed to create group';
+      showToast(msg, 'error');
       throw err;
     }
   };
@@ -55,36 +85,59 @@ function TodoApp() {
   const handleEditGroup = async (id, groupData) => {
     try {
       const response = await groupsAPI.update(id, groupData);
-      setGroups(groups.map(g => g.id === id ? response.data : g));
+      setGroups((prev) =>
+        prev.map((g) => (g.id === id ? { ...g, ...response.data } : g))
+      );
+      if (selectedGroup?.id === id) {
+        setSelectedGroup((prev) => ({ ...prev, ...response.data }));
+      }
+      showToast('Group updated');
     } catch (err) {
-      setError('Failed to edit group.');
+      const msg = err.response?.data?.error || 'Failed to update group';
+      showToast(msg, 'error');
       throw err;
     }
   };
 
   const handleDeleteGroup = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this group?')) {
-      return;
-    }
+    if (!window.confirm('Delete this group?')) return;
     try {
       await groupsAPI.delete(id);
-      setGroups(groups.filter(g => g.id !== id));
-      if (selectedGroup?.id === id) {
-        setSelectedGroup(null);
-      }
+      setGroups((prev) => prev.filter((g) => g.id !== id));
+      if (selectedGroup?.id === id) setSelectedGroup(null);
+      showToast('Group deleted');
     } catch (err) {
-      setError('Failed to delete group.');
+      const msg = err.response?.data?.error || 'Failed to delete group';
+      showToast(msg, 'error');
     }
   };
 
-  const handleTodoAdded = () => {
-    setRefreshTodos(prev => prev + 1);
+  const handleTodoAdded = (newTodo) => {
+    setTodos((prev) => [newTodo, ...prev]);
+    fetchGroups();
+    showToast('Todo created');
+  };
+
+  const handleTodoUpdated = (updatedTodo) => {
+    setTodos((prev) =>
+      prev.map((t) => (t.id === updatedTodo.id ? updatedTodo : t))
+    );
+    fetchGroups();
+  };
+
+  const handleTodoDeleted = (id) => {
+    setTodos((prev) => prev.filter((t) => t.id !== id));
+    fetchGroups();
+    showToast('Todo deleted');
   };
 
   if (loading) {
     return (
       <div className="app">
-        <div className="loading">Loading...</div>
+        <div className="loading-screen">
+          <div className="spinner" />
+          <p>Loading...</p>
+        </div>
       </div>
     );
   }
@@ -92,14 +145,38 @@ function TodoApp() {
   return (
     <div className="app">
       <header className="header">
-        <h1>Todo App</h1>
-        <button className="theme-toggle" onClick={toggleTheme}>
-          {isDarkMode ? '☀️' : '🌙'} 
-          {isDarkMode ? 'Light Mode' : 'Dark Mode'}
-        </button>
+        <div className="header-left">
+          <h1>
+            To Do <span className="header-accent">by Akshay</span>
+          </h1>
+        </div>
+        <div className="header-right">
+          <div className="search-bar">
+            <span className="search-icon">&#128269;</span>
+            <input
+              type="text"
+              placeholder="Search todos..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                className="search-clear"
+                onClick={() => setSearchQuery('')}
+              >
+                &times;
+              </button>
+            )}
+          </div>
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDarkMode ? '☀️' : '🌙'}
+          </button>
+        </div>
       </header>
-
-      {error && <div className="error">{error}</div>}
 
       <div className="main-container">
         <aside className="sidebar">
@@ -114,51 +191,35 @@ function TodoApp() {
         </aside>
 
         <main className="content">
-          <div className="section-title">
-            {selectedGroup ? selectedGroup.name : 'All Tasks'}
-            <div className="controls">
-              <div className="filter-controls">
-                <button
-                  className={`btn btn-sm ${completionFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setCompletionFilter('all')}
-                >
-                  All
-                </button>
-                <button
-                  className={`btn btn-sm ${completionFilter === 'completed' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setCompletionFilter('completed')}
-                >
-                  Completed
-                </button>
-                <button
-                  className={`btn btn-sm ${completionFilter === 'notCompleted' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setCompletionFilter('notCompleted')}
-                >
-                  Not Completed
-                </button>
+          <div className="content-header">
+            <h2 className="content-title">
+              {selectedGroup ? selectedGroup.name : 'All Tasks'}
+              {!todosLoading && (
+                <span className="todo-count">{todos.length}</span>
+              )}
+            </h2>
+            <div className="filters">
+              <div className="filter-group">
+                {['all', 'completed', 'active'].map((filter) => (
+                  <button
+                    key={filter}
+                    className={`filter-btn ${completionFilter === filter ? 'active' : ''}`}
+                    onClick={() => setCompletionFilter(filter)}
+                  >
+                    {filter === 'all'
+                      ? 'All'
+                      : filter === 'completed'
+                        ? 'Done'
+                        : 'Active'}
+                  </button>
+                ))}
               </div>
-              <div className="checkbox-group">
-                <button
-                  className="btn btn-sm btn-warning"
-                  onClick={() => {
-                    if (showHidden) {
-                      // Hide protected - no PIN needed
-                      setShowHidden(false);
-                    } else {
-                      // Show protected - PIN required
-                      setShowPinModal(true);
-                    }
-                  }}
-                >
-                  {showHidden ? 'Hide Protected' : 'Show Protected'}
-                </button>
-                <button
-                  className="btn btn-sm btn-secondary"
-                  onClick={() => setShowChangePinModal(true)}
-                >
-                  Change PIN
-                </button>
-              </div>
+              <button
+                className={`filter-btn standalone ${showHidden ? 'active hidden-active' : ''}`}
+                onClick={() => setShowHidden((prev) => !prev)}
+              >
+                {showHidden ? '🔓 Hidden' : '🔒 Hidden'}
+              </button>
             </div>
           </div>
 
@@ -169,29 +230,23 @@ function TodoApp() {
           />
 
           <TodoList
-            key={`${selectedGroup?.id}-${showHidden}-${completionFilter}-${refreshTodos}`}
-            groupId={selectedGroup?.id}
-            showHidden={showHidden}
-            groups={groups}
+            todos={todos}
+            loading={todosLoading}
             completionFilter={completionFilter}
+            groups={groups}
+            onTodoUpdated={handleTodoUpdated}
+            onTodoDeleted={handleTodoDeleted}
+            showToast={showToast}
           />
         </main>
       </div>
-      {showPinModal && (
-        <PinModal
-          onClose={() => setShowPinModal(false)}
-          onPinVerified={() => {
-            setShowHidden(true);
-            setShowPinModal(false);
-          }}
-          hiddenPin={hiddenPin}
-        />
-      )}
-      {showChangePinModal && (
-        <ChangePinModal
-          onClose={() => setShowChangePinModal(false)}
-          onPinChanged={(newPin) => setHiddenPin(newPin)}
-          hiddenPin={hiddenPin}
+
+      {toast && (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={dismissToast}
         />
       )}
     </div>
