@@ -1,62 +1,91 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const dbPath = path.join(__dirname, 'todo.db');
-
 class Database {
-  constructor() {
-    this.db = new sqlite3.Database(dbPath, (err) => {
-      if (err) {
-        console.error('Error opening database:', err.message);
-      } else {
-        console.log('Connected to SQLite database');
-        this.init();
-      }
+  constructor(dbPath) {
+    this.dbPath = dbPath || path.join(__dirname, 'todo.db');
+    this.db = null;
+  }
+
+  connect() {
+    return new Promise((resolve, reject) => {
+      this.db = new sqlite3.Database(this.dbPath, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
   }
 
-  init() {
-    // Create groups table
-    this.db.run(`
+  run(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.run(sql, params, function (err) {
+        if (err) reject(err);
+        else resolve({ lastID: this.lastID, changes: this.changes });
+      });
+    });
+  }
+
+  get(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.get(sql, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+  }
+
+  all(sql, params = []) {
+    return new Promise((resolve, reject) => {
+      this.db.all(sql, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  }
+
+  async init() {
+    await this.connect();
+
+    await this.run('PRAGMA journal_mode = WAL');
+    await this.run('PRAGMA foreign_keys = ON');
+
+    await this.run(`
       CREATE TABLE IF NOT EXISTS groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
-        color TEXT DEFAULT '#007bff',
+        color TEXT DEFAULT '#6366f1',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Create todos table
-    this.db.run(`
+    await this.run(`
       CREATE TABLE IF NOT EXISTS todos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
-        description TEXT,
-        completed BOOLEAN DEFAULT 0,
-        pinned BOOLEAN DEFAULT 0,
-        hidden BOOLEAN DEFAULT 0,
+        description TEXT DEFAULT '',
+        completed INTEGER DEFAULT 0,
+        pinned INTEGER DEFAULT 0,
+        hidden INTEGER DEFAULT 0,
         group_id INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (group_id) REFERENCES groups (id) ON DELETE SET NULL
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE SET NULL
       )
     `);
 
-    // Insert default group if none exists
-    this.db.get("SELECT COUNT(*) as count FROM groups", (err, row) => {
-      if (!err && row.count === 0) {
-        this.db.run("INSERT INTO groups (name, color) VALUES ('General', '#007bff')");
-      }
-    });
+    const row = await this.get('SELECT COUNT(*) as count FROM groups');
+    if (row.count === 0) {
+      await this.run("INSERT INTO groups (name, color) VALUES ('General', '#6366f1')");
+    }
   }
 
   close() {
-    this.db.close((err) => {
-      if (err) {
-        console.error('Error closing database:', err.message);
-      } else {
-        console.log('Database connection closed');
-      }
+    return new Promise((resolve, reject) => {
+      if (!this.db) return resolve();
+      this.db.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
   }
 }

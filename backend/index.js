@@ -6,278 +6,319 @@ const app = express();
 const PORT = process.env.PORT || 5757;
 const db = new Database();
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(express.json({ limit: '1mb' }));
 
-// Routes
+// ── Group Routes ──
 
-// Get all groups
-app.get('/api/groups', (req, res) => {
-  db.db.all('SELECT * FROM groups ORDER BY created_at ASC', (err, rows) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
-    }
-    res.json(rows);
-  });
-});
-
-// Create a new group
-app.post('/api/groups', (req, res) => {
-  const { name, color = '#007bff' } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ error: 'Group name is required' });
+app.get('/api/groups', async (req, res, next) => {
+  try {
+    const groups = await db.all(`
+      SELECT g.*, COUNT(t.id) as todo_count
+      FROM groups g
+      LEFT JOIN todos t ON t.group_id = g.id
+      GROUP BY g.id
+      ORDER BY g.created_at ASC
+    `);
+    res.json(groups);
+  } catch (err) {
+    next(err);
   }
-
-  db.db.run(
-    'INSERT INTO groups (name, color) VALUES (?, ?)',
-    [name, color],
-    function (err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: 'Group name already exists' });
-        }
-        return res.status(500).json({ error: err.message });
-      }
-      res.json({ id: this.lastID, name, color });
-    }
-  );
 });
 
-// Update a group
-app.put('/api/groups/:id', (req, res) => {
-  const { id } = req.params;
-  const { name, color } = req.body;
+app.post('/api/groups', async (req, res, next) => {
+  try {
+    const { name, color = '#6366f1' } = req.body;
 
-  if (!name) {
-    return res.status(400).json({ error: 'Group name is required' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Group name is required' });
+    }
+    if (name.trim().length > 50) {
+      return res.status(400).json({ error: 'Group name must be 50 characters or less' });
+    }
+
+    const result = await db.run(
+      'INSERT INTO groups (name, color) VALUES (?, ?)',
+      [name.trim(), color]
+    );
+
+    res.status(201).json({
+      id: result.lastID,
+      name: name.trim(),
+      color,
+      todo_count: 0,
+    });
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ error: 'A group with this name already exists' });
+    }
+    next(err);
   }
-
-  db.db.run(
-    'UPDATE groups SET name = ?, color = ? WHERE id = ?',
-    [name, color, id],
-    function (err) {
-      if (err) {
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ error: 'Group name already exists' });
-        }
-        return res.status(500).json({ error: err.message });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Group not found' });
-      }
-      res.json({ id: parseInt(id), name, color });
-    }
-  );
 });
 
-// Delete a group
-app.delete('/api/groups/:id', (req, res) => {
-  const { id } = req.params;
+app.put('/api/groups/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name, color } = req.body;
 
-  // First, check if group has todos
-  db.db.get(
-    'SELECT COUNT(*) as count FROM todos WHERE group_id = ?',
-    [id],
-    (err, row) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Group name is required' });
+    }
+    if (name.trim().length > 50) {
+      return res.status(400).json({ error: 'Group name must be 50 characters or less' });
+    }
 
-      if (row.count > 0) {
-        return res.status(400).json({
-          error: 'Cannot delete group with existing todos. Move or delete todos first.'
-        });
-      }
+    const result = await db.run(
+      'UPDATE groups SET name = ?, color = ? WHERE id = ?',
+      [name.trim(), color, id]
+    );
 
-      // Delete the group
-      db.db.run('DELETE FROM groups WHERE id = ?', [id], function (err) {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        if (this.changes === 0) {
-          return res.status(404).json({ error: 'Group not found' });
-        }
-        res.json({ message: 'Group deleted successfully' });
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    res.json({ id: parseInt(id), name: name.trim(), color });
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ error: 'A group with this name already exists' });
+    }
+    next(err);
+  }
+});
+
+app.delete('/api/groups/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const row = await db.get(
+      'SELECT COUNT(*) as count FROM todos WHERE group_id = ?',
+      [id]
+    );
+
+    if (row.count > 0) {
+      return res.status(400).json({
+        error: `Cannot delete group with ${row.count} todo(s). Move or delete them first.`,
       });
     }
-  );
-});
 
-// Get all todos
-app.get('/api/todos', (req, res) => {
-  const { group_id, show_hidden } = req.query;
+    const result = await db.run('DELETE FROM groups WHERE id = ?', [id]);
 
-  let query = `
-    SELECT t.*, 
-           g.name as group_name, 
-           g.color as group_color,
-           datetime(t.created_at, 'localtime') as formatted_created_at,
-           datetime(t.updated_at, 'localtime') as formatted_updated_at
-    FROM todos t 
-    LEFT JOIN groups g ON t.group_id = g.id
-  `;
-
-  const params = [];
-  const conditions = [];
-
-  if (group_id) {
-    conditions.push('t.group_id = ?');
-    params.push(group_id);
-  }
-
-  if (show_hidden !== 'true') {
-    conditions.push('t.hidden = 0');
-  }
-
-  if (conditions.length > 0) {
-    query += ' WHERE ' + conditions.join(' AND ');
-  }
-
-  query += ' ORDER BY t.pinned DESC, t.created_at DESC';
-
-  db.db.all(query, params, (err, rows) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Group not found' });
     }
-    res.json(rows);
-  });
+
+    res.json({ message: 'Group deleted' });
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Create a new todo
-app.post('/api/todos', (req, res) => {
-  const { title, description, group_id } = req.body;
+// ── Todo Routes ──
 
-  if (!title) {
-    return res.status(400).json({ error: 'Todo title is required' });
+app.get('/api/todos', async (req, res, next) => {
+  try {
+    const { group_id, hidden, search } = req.query;
+
+    let query = `
+      SELECT t.*, g.name as group_name, g.color as group_color
+      FROM todos t
+      LEFT JOIN groups g ON t.group_id = g.id
+    `;
+
+    const params = [];
+    const conditions = [];
+
+    if (group_id) {
+      conditions.push('t.group_id = ?');
+      params.push(group_id);
+    }
+
+    if (hidden === 'true') {
+      conditions.push('t.hidden = 1');
+    } else {
+      conditions.push('t.hidden = 0');
+    }
+
+    if (search) {
+      conditions.push('(t.title LIKE ? OR t.description LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    query += ' ORDER BY t.pinned DESC, t.created_at DESC';
+
+    const todos = await db.all(query, params);
+    res.json(todos);
+  } catch (err) {
+    next(err);
   }
+});
 
-  db.db.run(
-    'INSERT INTO todos (title, description, group_id) VALUES (?, ?, ?)',
-    [title, description, group_id],
-    function (err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+app.post('/api/todos', async (req, res, next) => {
+  try {
+    const { title, description = '', group_id = null } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Todo title is required' });
+    }
+    if (title.trim().length > 200) {
+      return res.status(400).json({ error: 'Title must be 200 characters or less' });
+    }
+
+    if (group_id) {
+      const group = await db.get('SELECT id FROM groups WHERE id = ?', [group_id]);
+      if (!group) {
+        return res.status(400).json({ error: 'Selected group does not exist' });
       }
-
-      // Get the created todo with group info
-      db.db.get(
-        `SELECT t.*, g.name as group_name, g.color as group_color 
-         FROM todos t 
-         LEFT JOIN groups g ON t.group_id = g.id 
-         WHERE t.id = ?`,
-        [this.lastID],
-        (err, row) => {
-          if (err) {
-            return res.status(500).json({ error: err.message });
-          }
-          res.json(row);
-        }
-      );
-    }
-  );
-});
-
-// Update a todo
-app.put('/api/todos/:id', (req, res) => {
-  const { id } = req.params;
-  const { title, description, completed, pinned, hidden, group_id } = req.body;
-
-  const updates = [];
-  const params = [];
-
-  if (title !== undefined) {
-    updates.push('title = ?');
-    params.push(title);
-  }
-  if (description !== undefined) {
-    updates.push('description = ?');
-    params.push(description);
-  }
-  if (completed !== undefined) {
-    updates.push('completed = ?');
-    params.push(completed ? 1 : 0);
-  }
-  if (pinned !== undefined) {
-    updates.push('pinned = ?');
-    params.push(pinned ? 1 : 0);
-  }
-  if (hidden !== undefined) {
-    updates.push('hidden = ?');
-    params.push(hidden ? 1 : 0);
-  }
-  if (group_id !== undefined) {
-    updates.push('group_id = ?');
-    params.push(group_id);
-  }
-
-  updates.push('updated_at = CURRENT_TIMESTAMP');
-  params.push(id);
-
-  const query = `UPDATE todos SET ${updates.join(', ')} WHERE id = ?`;
-
-  db.db.run(query, params, function (err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'Todo not found' });
     }
 
-    // Get the updated todo with group info
-    db.db.get(
-      `SELECT t.*, g.name as group_name, g.color as group_color 
-       FROM todos t 
-       LEFT JOIN groups g ON t.group_id = g.id 
-       WHERE t.id = ?`,
-      [id],
-      (err, row) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        res.json(row);
-      }
+    const result = await db.run(
+      'INSERT INTO todos (title, description, group_id) VALUES (?, ?, ?)',
+      [title.trim(), description.trim(), group_id]
     );
-  });
+
+    const todo = await db.get(
+      `SELECT t.*, g.name as group_name, g.color as group_color
+       FROM todos t
+       LEFT JOIN groups g ON t.group_id = g.id
+       WHERE t.id = ?`,
+      [result.lastID]
+    );
+
+    res.status(201).json(todo);
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Delete a todo
-app.delete('/api/todos/:id', (req, res) => {
-  const { id } = req.params;
+app.put('/api/todos/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { title, description, completed, pinned, hidden, group_id } = req.body;
 
-  db.db.run('DELETE FROM todos WHERE id = ?', [id], function (err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
+    const updates = [];
+    const params = [];
+
+    if (title !== undefined) {
+      if (!title.trim()) {
+        return res.status(400).json({ error: 'Title cannot be empty' });
+      }
+      if (title.trim().length > 200) {
+        return res.status(400).json({ error: 'Title must be 200 characters or less' });
+      }
+      updates.push('title = ?');
+      params.push(title.trim());
     }
-    if (this.changes === 0) {
+
+    if (description !== undefined) {
+      updates.push('description = ?');
+      params.push(typeof description === 'string' ? description.trim() : '');
+    }
+
+    if (completed !== undefined) {
+      updates.push('completed = ?');
+      params.push(completed ? 1 : 0);
+    }
+
+    if (pinned !== undefined) {
+      updates.push('pinned = ?');
+      params.push(pinned ? 1 : 0);
+    }
+
+    if (hidden !== undefined) {
+      updates.push('hidden = ?');
+      params.push(hidden ? 1 : 0);
+    }
+
+    if (group_id !== undefined) {
+      if (group_id !== null) {
+        const group = await db.get('SELECT id FROM groups WHERE id = ?', [group_id]);
+        if (!group) {
+          return res.status(400).json({ error: 'Selected group does not exist' });
+        }
+      }
+      updates.push('group_id = ?');
+      params.push(group_id);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    const result = await db.run(
+      `UPDATE todos SET ${updates.join(', ')} WHERE id = ?`,
+      params
+    );
+
+    if (result.changes === 0) {
       return res.status(404).json({ error: 'Todo not found' });
     }
-    res.json({ message: 'Todo deleted successfully' });
-  });
+
+    const todo = await db.get(
+      `SELECT t.*, g.name as group_name, g.color as group_color
+       FROM todos t
+       LEFT JOIN groups g ON t.group_id = g.id
+       WHERE t.id = ?`,
+      [id]
+    );
+
+    res.json(todo);
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Health check endpoint
+app.delete('/api/todos/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await db.run('DELETE FROM todos WHERE id = ?', [id]);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Todo not found' });
+    }
+
+    res.json({ message: 'Todo deleted' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  console.error(`[${new Date().toISOString()}] ${err.stack || err.message}`);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+async function start() {
+  try {
+    await db.init();
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  }
+}
+
+start();
+
+process.on('SIGINT', async () => {
+  await db.close();
+  process.exit(0);
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\nShutting down gracefully...');
-  db.close();
+process.on('SIGTERM', async () => {
+  await db.close();
   process.exit(0);
 });

@@ -1,131 +1,123 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { todosAPI } from '../services/api';
 
-const EditTodo = ({ todo, groups, onTodoUpdated, onClose }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    group_id: null
-  });
+function EditTodo({ todo, groups, onTodoUpdated, onClose }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [groupId, setGroupId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (todo) {
-      setFormData({
-        title: todo.title || '',
-        description: todo.description || '',
-        group_id: todo.group_id || null
-      });
+      setTitle(todo.title || '');
+      setDescription(todo.description || '');
+      setGroupId(todo.group_id || null);
     }
   }, [todo]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title.trim()) return;
+    if (!title.trim() || loading) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      const response = await todosAPI.update(todo.id, formData);
+      const response = await todosAPI.update(todo.id, {
+        title: title.trim(),
+        description: description.trim(),
+        group_id: groupId,
+      });
       onTodoUpdated(response.data);
-      onClose();
     } catch (err) {
-      setError('Failed to update todo');
-      console.error('Error updating todo:', err);
+      setError(err.response?.data?.error || 'Failed to update todo');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) {
-      onClose();
     }
   };
 
   if (!todo) return null;
 
   return (
-    <div className="modal" onClick={handleBackdropClick}>
-      <div className="modal-content">
+    <div
+      className="modal-backdrop"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="modal">
         <div className="modal-header">
-          <h2 className="modal-title">Edit Todo</h2>
-          <button className="close-btn" onClick={onClose}>
-            ×
+          <h2>Edit Todo</h2>
+          <button className="modal-close" onClick={onClose}>
+            &times;
           </button>
         </div>
 
-        {error && <div className="error">{error}</div>}
+        {error && <div className="form-error">{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          <div className="input-group">
+          <div className="form-field">
             <label htmlFor="edit-title">Title</label>
             <input
               id="edit-title"
               type="text"
-              placeholder="Todo title"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
               required
               disabled={loading}
             />
           </div>
 
-          <div className="input-group">
+          <div className="form-field">
             <label htmlFor="edit-description">Description</label>
             <textarea
               id="edit-description"
-              placeholder="Description (optional)"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              rows="3"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
               disabled={loading}
             />
           </div>
 
-          <div className="input-group">
+          <div className="form-field">
             <label htmlFor="edit-group">Group</label>
             <select
               id="edit-group"
-              value={formData.group_id || ''}
-              onChange={(e) => setFormData({ 
-                ...formData, 
-                group_id: e.target.value ? parseInt(e.target.value) : null 
-              })}
+              value={groupId || ''}
+              onChange={(e) =>
+                setGroupId(e.target.value ? parseInt(e.target.value) : null)
+              }
               disabled={loading}
             >
               <option value="">No Group</option>
-              {groups.map(group => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="form-actions">
-            <button 
-              type="button" 
-              className="btn btn-secondary" 
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn-secondary"
               onClick={onClose}
               disabled={loading}
             >
               Cancel
             </button>
-            <button 
-              type="submit" 
-              className="btn btn-primary"
-              disabled={loading || !formData.title.trim()}
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={loading || !title.trim()}
             >
-              {loading ? 'Updating...' : 'Update Todo'}
+              {loading ? 'Saving...' : 'Save'}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
-};
+}
 
 export default EditTodo;

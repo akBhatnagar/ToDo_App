@@ -1,78 +1,93 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { todosAPI } from '../services/api';
 
-const AddTodo = ({ groupId, groups = [], onTodoAdded }) => {
-  const [formData, setFormData] = useState({ 
-    title: '', 
-    description: '', 
-    group_id: groupId || null 
-  });
+function AddTodo({ groupId, groups = [], onTodoAdded }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [groupValue, setGroupValue] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title) return;
+    if (!title.trim() || submitting) return;
+
+    setSubmitting(true);
     try {
-      const newTodo = { 
-        title: formData.title,
-        description: formData.description,
-        group_id: formData.group_id || groupId 
-      };
-      const response = await todosAPI.create(newTodo);
-      onTodoAdded(response.data);
-      setFormData({ 
-        title: '', 
-        description: '', 
-        group_id: groupId || null 
+      const response = await todosAPI.create({
+        title: title.trim(),
+        description: description.trim(),
+        group_id: groupValue ? parseInt(groupValue) : groupId || null,
       });
+      onTodoAdded(response.data);
+      setTitle('');
+      setDescription('');
+      setGroupValue('');
+      setExpanded(false);
     } catch (error) {
-      console.error('Error adding todo:', error);
+      console.error('Failed to add todo:', error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      handleSubmit(e);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem' }}>
-      <div className="input-group">
+    <form
+      className="add-todo-form"
+      onSubmit={handleSubmit}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="add-todo-main">
         <input
           type="text"
-          placeholder="Todo title"
-          value={formData.title}
-          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          className="add-todo-input"
+          placeholder="What needs to be done?"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onFocus={() => setExpanded(true)}
           required
         />
+        <button
+          type="submit"
+          className="add-todo-btn"
+          disabled={!title.trim() || submitting}
+        >
+          {submitting ? '...' : 'Add'}
+        </button>
       </div>
-      <div className="input-group">
-        <textarea
-          placeholder="Description"
-          value={formData.description}
-          onChange={(e) =>
-            setFormData({ ...formData, description: e.target.value })
-          }
-        />
-      </div>
-      {!groupId && groups.length > 0 && (
-        <div className="input-group">
-          <select
-            value={formData.group_id || ''}
-            onChange={(e) => setFormData({ 
-              ...formData, 
-              group_id: e.target.value ? parseInt(e.target.value) : null 
-            })}
-          >
-            <option value="">Select Group (Optional)</option>
-            {groups.map(group => (
-              <option key={group.id} value={group.id}>
-                {group.name}
-              </option>
-            ))}
-          </select>
+
+      {expanded && (
+        <div className="add-todo-details">
+          <textarea
+            placeholder="Add a description... (optional)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+          />
+          {!groupId && groups.length > 0 && (
+            <select
+              value={groupValue}
+              onChange={(e) => setGroupValue(e.target.value)}
+            >
+              <option value="">No group</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <p className="form-hint">Press ⌘+Enter to submit</p>
         </div>
       )}
-      <button type="submit" className="btn btn-success">
-        Add Todo
-      </button>
     </form>
   );
-};
+}
 
 export default AddTodo;
-
